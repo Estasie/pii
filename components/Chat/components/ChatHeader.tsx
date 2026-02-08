@@ -9,6 +9,7 @@ interface ChatHeaderProps {
   hasMessages: boolean;
   isLoading: boolean;
   onClear: () => void;
+  isNewChat: boolean;
 }
 
 export const ChatHeader = ({
@@ -16,13 +17,17 @@ export const ChatHeader = ({
   hasMessages,
   isLoading,
   onClear,
+  isNewChat,
 }: ChatHeaderProps) => {
+  // Показываем токены только если это не новый чат и есть данные о токенах
+  const shouldShowTokens = !isNewChat && tokenUsage;
+
   return (
     <CardHeader className="border-b">
       <div className="flex items-center justify-between">
         <CardTitle>Chat with AI</CardTitle>
         <div className="flex items-center gap-2">
-          {tokenUsage && (
+          {shouldShowTokens && (
             <div className="flex gap-2">
               <Badge variant="outline">Prompt: {tokenUsage.promptTokens}</Badge>
               <Badge variant="outline">

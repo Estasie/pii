@@ -75,6 +75,9 @@ export const Chat = () => {
     }
   };
 
+  // Определяем, является ли чат новым (нет ID разговора)
+  const isNewChat = !currentConversationId;
+
   return (
     <div className="flex h-screen">
       <ConversationSidebar
@@ -91,6 +94,7 @@ export const Chat = () => {
             hasMessages={messages.length > 0}
             isLoading={isLoading}
             onClear={clearMessages}
+            isNewChat={isNewChat}
           />
           <ChatMessages
             messages={messages}

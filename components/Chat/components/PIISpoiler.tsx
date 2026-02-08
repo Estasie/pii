@@ -1,7 +1,7 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import { useReveal } from "@/hooks/useReveal";
+import { Spoiler } from "spoiled";
 
 interface PIISpoilerProps {
   originalText: string;
@@ -23,23 +23,9 @@ export const PIISpoiler = ({
           {originalText}
         </span>
       ) : (
-        <button
-          onClick={reveal}
-          className={cn(
-            "relative inline-block cursor-pointer overflow-hidden",
-            "transition-all duration-200 hover:opacity-80",
-            "bg-gray-200/50 dark:bg-gray-700/50 backdrop-blur-sm rounded",
-          )}
-          style={{
-            width: `${originalText.length * 0.6}em`,
-            minWidth: "3em",
-            height: "1.2em",
-          }}
-          title={`Click to reveal ${type}`}
-        >
-          <span className="invisible">{originalText}</span>
-          <span className="absolute inset-0 pii-dots-animation" />
-        </button>
+        <Spoiler onClick={reveal} title={`Click to reveal ${type}`}>
+          {originalText}
+        </Spoiler>
       )}
     </span>
   );
