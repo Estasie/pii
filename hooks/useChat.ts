@@ -144,6 +144,7 @@ export function useChat(conversationId?: string | null) {
         const decoder = new TextDecoder();
         let assistantMessage = "";
         let piiMarkers: PIIMarker[] = [];
+        const allPIIMarkers: PIIMarker[] = [];
 
         if (reader) {
           while (true) {
@@ -165,7 +166,7 @@ export function useChat(conversationId?: string | null) {
                       {
                         role: "assistant",
                         content: assistantMessage,
-                        piiMarkers,
+                        piiMarkers: allPIIMarkers,
                       },
                     ]);
                   }
@@ -174,9 +175,38 @@ export function useChat(conversationId?: string | null) {
                     setTokenUsage(data.usage);
                   }
 
+                  // Handle chunked PII detection (deterministic/regex-based)
+                  if (data.piiChunk && data.piiChunk.markers) {
+                    // Add new markers from this chunk
+                    const newMarkers = data.piiChunk.markers;
+
+                    // Merge with existing markers, avoiding duplicates
+                    for (const marker of newMarkers) {
+                      const isDuplicate = allPIIMarkers.some(
+                        (existing) =>
+                          existing.startIndex === marker.startIndex &&
+                          existing.endIndex === marker.endIndex,
+                      );
+                      if (!isDuplicate) {
+                        allPIIMarkers.push(marker);
+                      }
+                    }
+
+                    // Update UI immediately with new PII markers
+                    setMessages([
+                      ...newMessages,
+                      {
+                        role: "assistant",
+                        content: assistantMessage,
+                        piiMarkers: [...allPIIMarkers],
+                      },
+                    ]);
+                  }
+
+                  // Handle final PII detection (deterministic + LLM-based)
                   if (data.piiDetection) {
                     piiMarkers = data.piiDetection.piiMarkers || [];
-                    // Update the message with PII markers
+                    // Update the message with final PII markers
                     setMessages([
                       ...newMessages,
                       {

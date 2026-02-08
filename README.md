@@ -1,52 +1,70 @@
-# AI Chat with PII Protection
+# PII Detection Chat Application
 
-A Next.js-based AI chat application with built-in PII (Personally Identifiable Information) detection and protection.
+A Next.js chat application with advanced PII (Personally Identifiable Information) detection and masking capabilities.
 
 ## Features
 
-- 🤖 **AI Chat Interface** - Real-time streaming chat with OpenAI GPT-4o-mini
-- 🔒 **PII Detection & Protection** - Automatic detection and masking of sensitive information
-- 💾 **Conversation Management** - Save, load, and manage chat history
-- 🎨 **Modern UI** - Beautiful interface with dark mode support
-- 🔗 **Shareable Links** - Share specific conversations via URL
-- 📊 **Token Usage Tracking** - Monitor API usage in real-time
+- **Real-time Chat**: Stream responses from OpenAI's GPT-4o-mini
+- **Advanced PII Detection**: Two-tier detection system
+  - **Deterministic Detection (Regex-based)**: Instant detection of emails, phone numbers, credit cards, SSNs during streaming
+  - **Unstructured Detection (LLM-based)**: Context-aware detection of names, addresses, and other PII after streaming completes
+- **Interactive PII Masking**: Click-to-reveal spoilers for detected PII
+- **Conversation Management**: Save and load chat conversations
+- **SQLite Storage**: Persistent storage for conversations and PII detection results
 
-## PII Protection
+## Architecture
 
-The application automatically detects and protects various types of PII:
+### Chunked + Regex-Based Early Masking
 
-- Names (full names, first names, last names)
-- Email addresses
-- Phone numbers
-- Physical addresses
-- Social Security Numbers
-- Credit card numbers
-- Passport numbers
-- Driver's license numbers
-- IP addresses
+The application implements a sophisticated two-phase PII detection system:
 
-### How it works
+```
+LLM Stream → Chunk Buffer (50 chars)
+   ↓
+   → Regex Scan Chunk → UI immediately shows spoilers for deterministic PII
+   ↓
+   → Full Text Buffer → LLM/ML PII Detector after streaming completes
+   ↓
+   → Final UI Update with all PII (deterministic + unstructured)
+```
 
-1. **Detection**: LLM analyzes responses and identifies PII entities
-2. **Marking**: PII is marked with type and position information
-3. **Masking**: Sensitive data is hidden behind animated spoilers
-4. **Storage**: Original content and PII markers are stored separately
-5. **Reveal**: Users can click spoilers to temporarily reveal PII
+#### Phase 1: Streaming Detection (Deterministic)
+- **When**: During LLM response streaming
+- **Method**: Regex patterns
+- **Detects**: 
+  - Email addresses
+  - Phone numbers (US format)
+  - Credit card numbers (with Luhn validation)
+  - Social Security Numbers
+  - IP addresses
+  - URLs
+- **Result**: Immediate UI masking as content streams
+
+#### Phase 2: Post-Stream Detection (Unstructured)
+- **When**: After streaming completes
+- **Method**: LLM analysis (GPT-4o-mini)
+- **Detects**:
+  - Personal names
+  - Physical addresses
+  - Dates of birth
+  - Other contextual PII
+- **Result**: Final comprehensive PII masking
 
 ## Tech Stack
 
-- **Framework**: Next.js 16 with App Router
-- **UI**: React 19, Tailwind CSS, shadcn/ui
-- **Database**: SQLite with better-sqlite3
-- **AI**: OpenAI GPT-4o-mini
+- **Framework**: Next.js 15 with App Router
 - **Language**: TypeScript
+- **Database**: SQLite
+- **AI**: OpenAI GPT-4o-mini
+- **UI**: React with Tailwind CSS
+- **Styling**: shadcn/ui components
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ 
-- npm/yarn/pnpm
+- npm or yarn
 - OpenAI API key
 
 ### Installation
@@ -62,7 +80,7 @@ cd next-app
 npm install
 ```
 
-3. Create `.env.local` file:
+3. Create a `.env.local` file:
 ```bash
 cp .env.example .env.local
 ```
@@ -83,127 +101,137 @@ npm run dev
 
 ```
 next-app/
-├── app/                      # Next.js app directory
-│   ├── api/                  # API routes
-│   │   ├── chat/            # Chat streaming endpoint
-│   │   ├── conversations-sqlite/  # Conversation CRUD
+├── app/
+│   ├── api/
+│   │   ├── chat/              # Streaming chat endpoint with PII detection
+│   │   ├── conversations-sqlite/  # Conversation CRUD operations
 │   │   └── pii-detection-sqlite/  # PII detection storage
-│   ├── globals.css          # Global styles & animations
-│   └── page.tsx             # Main page
+│   ├── page.tsx               # Main chat page
+│   └── layout.tsx
 ├── components/
-│   └── Chat/                # Chat components
-│       ├── Chat.tsx         # Main chat container
-│       └── components/      # Sub-components
-│           ├── ChatHeader.tsx
-│           ├── ChatInput.tsx
-│           ├── ChatMessage.tsx
-│           ├── ChatMessages.tsx
-│           ├── PIISpoiler.tsx  # PII masking component
-│           └── ConversationSidebar.tsx
-├── hooks/                   # Custom React hooks
-│   ├── useChat.ts          # Chat logic & streaming
-│   ├── useConversations.ts # Conversation management
-│   ├── usePIIDetection.ts  # PII detection logic
-│   └── useReveal.ts        # Spoiler reveal logic
-├── lib/                     # Utility libraries
-│   ├── piiDetection.ts     # PII detection & marking
-│   ├── sqlite.ts           # Database initialization
-│   └── utils.ts            # Helper functions
-└── models/                  # TypeScript models
-    ├── Conversation.ts
-    └── PIIDetection.ts
+│   ├── Chat/
+│   │   ├── Chat.tsx           # Main chat component
+│   │   └── components/
+│   │       ├── ChatMessage.tsx    # Message rendering with PII spoilers
+│   │       ├── PIISpoiler.tsx     # Interactive PII masking component
+│   │       └── ...
+│   └── ui/                    # shadcn/ui components
+├── hooks/
+│   ├── useChat.ts             # Chat logic with streaming PII detection
+│   ├── usePIIDetection.ts     # PII detection state management
+│   └── useReveal.ts           # PII reveal state management
+├── lib/
+│   ├── piiDetection.ts        # Core PII detection logic
+│   └── sqlite.ts              # SQLite database utilities
+└── models/
+    ├── Conversation.ts        # Conversation data model
+    └── PIIDetection.ts        # PII detection data model
+```
+
+## Key Components
+
+### PII Detection Library (`lib/piiDetection.ts`)
+
+- `detectDeterministicPII(text)`: Fast regex-based detection for structured PII
+- `detectUnstructuredPII(text)`: LLM-based detection for contextual PII
+- `detectAllPII(text)`: Combined detection with deduplication
+- `markPIIInText(text, entities)`: Creates masked text with PII markers
+
+### Chat API (`app/api/chat/route.ts`)
+
+Implements the streaming architecture:
+1. Streams LLM responses to client
+2. Buffers chunks (50 characters)
+3. Runs regex detection on chunks
+4. Sends immediate PII markers to UI
+5. After streaming, runs full LLM detection
+6. Sends final comprehensive PII markers
+
+### Chat Hook (`hooks/useChat.ts`)
+
+Manages chat state and handles:
+- Streaming message reception
+- Real-time PII marker updates
+- Conversation persistence
+- Message history loading
+
+## PII Detection Examples
+
+### Deterministic (Regex-based)
+```
+Input: "Contact me at john@example.com or 555-123-4567"
+Detected: 
+  - email: john@example.com
+  - phone: 555-123-4567
+```
+
+### Unstructured (LLM-based)
+```
+Input: "My name is Alice Smith and I live on Main Street"
+Detected:
+  - name: Alice Smith
+  - address: Main Street
 ```
 
 ## Database Schema
 
-### Conversations
-- `id` - Unique identifier
-- `title` - Conversation title
-- `created_at` - Creation timestamp
-- `updated_at` - Last update timestamp
+### Conversations Table
+```sql
+CREATE TABLE conversations (
+  id TEXT PRIMARY KEY,
+  title TEXT,
+  messages TEXT,  -- JSON array
+  created_at INTEGER,
+  updated_at INTEGER
+)
+```
 
-### Messages
-- `id` - Auto-increment ID
-- `conversation_id` - Foreign key to conversations
-- `role` - 'user' or 'assistant'
-- `content` - Message content
-- `message_index` - Position in conversation
-- `created_at` - Creation timestamp
-
-### PII Detections
-- `id` - Auto-increment ID
-- `conversation_id` - Foreign key to conversations
-- `message_index` - Message position
-- `role` - Message role
-- `original_content` - Original text
-- `processed_content` - Text with PII markers
-- `detected_pii` - JSON array of detected PII
-- `pii_markers` - JSON array of PII positions
-- `user_id` - Optional user identifier
-- `created_at` - Creation timestamp
-
-## API Endpoints
-
-### Chat
-- `POST /api/chat` - Stream chat responses with PII detection
-
-### Conversations
-- `GET /api/conversations-sqlite` - List all conversations
-- `POST /api/conversations-sqlite` - Create new conversation
-- `GET /api/conversations-sqlite/[id]` - Get conversation by ID
-- `PUT /api/conversations-sqlite/[id]` - Update conversation
-- `DELETE /api/conversations-sqlite/[id]` - Delete conversation
-
-### PII Detection
-- `POST /api/pii-detection-sqlite` - Store PII detection result
-- `GET /api/pii-detection-sqlite` - Get PII detections by conversation
+### PII Detections Table
+```sql
+CREATE TABLE pii_detections (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT,
+  message_index INTEGER,
+  role TEXT,
+  original_content TEXT,
+  processed_content TEXT,
+  detected_pii TEXT,  -- JSON array
+  pii_markers TEXT,   -- JSON array
+  created_at INTEGER
+)
+```
 
 ## Environment Variables
 
-```env
-OPENAI_API_KEY=your_openai_api_key
-```
+- `OPENAI_API_KEY`: Your OpenAI API key (required)
 
 ## Development
 
+### Running Tests
 ```bash
-# Run development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-
-# Run linter
-npm run lint
+npm test
 ```
 
-## Features in Detail
+### Building for Production
+```bash
+npm run build
+npm start
+```
 
-### PII Spoiler Animation
-- Animated gradient with flowing dots effect
-- Smooth reveal/hide transitions
-- Supports light and dark themes
-- Click to reveal, persists until page reload
+## Contributing
 
-### Conversation Management
-- Auto-save conversations
-- Sidebar with conversation list
-- Delete conversations
-- URL-based conversation sharing
-
-### Streaming Responses
-- Real-time token-by-token streaming
-- Token usage tracking
-- Stop generation capability
-- Error handling
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
 ## License
 
 MIT
 
-## Contributing
+## Acknowledgments
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- OpenAI for GPT-4o-mini API
+- shadcn/ui for UI components
+- Next.js team for the framework

@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import { NextRequest } from "next/server";
-import { detectPII, markPIIInText } from "@/lib/piiDetection";
+import {
+  detectDeterministicPII,
+  detectAllPII,
+  markPIIInText,
+} from "@/lib/piiDetection";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -10,7 +14,6 @@ export async function POST(req: NextRequest) {
   try {
     const { messages } = await req.json();
 
-    //TODO: rewrite with new api
     const stream = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
@@ -23,7 +26,7 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     let fullContent = "";
     let chunkBuffer = "";
-    const CHUNK_SIZE = 50; // Process PII detection every 50 characters
+    const CHUNK_SIZE = 50; // Process regex PII detection every 50 characters
 
     const customStream = new ReadableStream({
       async start(controller) {
@@ -35,88 +38,82 @@ export async function POST(req: NextRequest) {
             fullContent += delta;
             chunkBuffer += delta;
 
-            // Check for PII in chunks
-            if (chunkBuffer.length >= CHUNK_SIZE || usage) {
-              const piiEntities = await detectPII(chunkBuffer);
-              const markedContent = markPIIInText(chunkBuffer, piiEntities);
+            // Send the content immediately to UI
+            const data = JSON.stringify({
+              content: delta,
+              usage: usage
+                ? {
+                    promptTokens: usage.prompt_tokens,
+                    completionTokens: usage.completion_tokens,
+                    totalTokens: usage.total_tokens,
+                  }
+                : null,
+            });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
-              // Send content with PII markers if any found
-              if (piiEntities.length > 0) {
-                const data = JSON.stringify({
-                  content: delta,
+            // Check for deterministic PII in chunks (regex-based)
+            if (chunkBuffer.length >= CHUNK_SIZE || usage) {
+              const deterministicPII = detectDeterministicPII(chunkBuffer);
+
+              // Send deterministic PII markers immediately if found
+              if (deterministicPII.length > 0) {
+                const chunkStartIndex = fullContent.length - chunkBuffer.length;
+
+                // Adjust indices to be relative to full content
+                const adjustedMarkers = deterministicPII.map((pii) => ({
+                  type: pii.type,
+                  startIndex: chunkStartIndex + pii.startIndex,
+                  endIndex: chunkStartIndex + pii.endIndex,
+                  originalValue: pii.value,
+                }));
+
+                const piiChunkData = JSON.stringify({
                   piiChunk: {
-                    originalChunk: chunkBuffer,
-                    processedChunk: markedContent.text,
-                    piiMarkers: markedContent.piiMarkers,
-                    chunkStartIndex: fullContent.length - chunkBuffer.length,
+                    markers: adjustedMarkers,
+                    chunkStartIndex,
+                    chunkEndIndex: fullContent.length,
                   },
-                  usage: usage
-                    ? {
-                        promptTokens: usage.prompt_tokens,
-                        completionTokens: usage.completion_tokens,
-                        totalTokens: usage.total_tokens,
-                      }
-                    : null,
                 });
-                controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-                chunkBuffer = "";
-              } else {
-                // No PII in this chunk, send normally
-                const data = JSON.stringify({
-                  content: delta,
-                  usage: usage
-                    ? {
-                        promptTokens: usage.prompt_tokens,
-                        completionTokens: usage.completion_tokens,
-                        totalTokens: usage.total_tokens,
-                      }
-                    : null,
-                });
-                controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-                chunkBuffer = "";
+                controller.enqueue(encoder.encode(`data: ${piiChunkData}\n\n`));
               }
-            } else {
-              // Buffer not full yet, send content normally
-              const data = JSON.stringify({
-                content: delta,
-                usage: usage
-                  ? {
-                      promptTokens: usage.prompt_tokens,
-                      completionTokens: usage.completion_tokens,
-                      totalTokens: usage.total_tokens,
-                    }
-                  : null,
-              });
-              controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+              chunkBuffer = "";
             }
           }
 
-          // Process any remaining buffer
+          // Process any remaining buffer for deterministic PII
           if (chunkBuffer.length > 0) {
-            const piiEntities = await detectPII(chunkBuffer);
-            const markedContent = markPIIInText(chunkBuffer, piiEntities);
+            const deterministicPII = detectDeterministicPII(chunkBuffer);
 
-            if (piiEntities.length > 0) {
-              const data = JSON.stringify({
+            if (deterministicPII.length > 0) {
+              const chunkStartIndex = fullContent.length - chunkBuffer.length;
+
+              const adjustedMarkers = deterministicPII.map((pii) => ({
+                type: pii.type,
+                startIndex: chunkStartIndex + pii.startIndex,
+                endIndex: chunkStartIndex + pii.endIndex,
+                originalValue: pii.value,
+              }));
+
+              const piiChunkData = JSON.stringify({
                 piiChunk: {
-                  originalChunk: chunkBuffer,
-                  processedChunk: markedContent.text,
-                  piiMarkers: markedContent.piiMarkers,
-                  chunkStartIndex: fullContent.length - chunkBuffer.length,
+                  markers: adjustedMarkers,
+                  chunkStartIndex,
+                  chunkEndIndex: fullContent.length,
                 },
               });
-              controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${piiChunkData}\n\n`));
             }
           }
 
-          // Send final PII detection for the complete message
+          // After streaming completes, run full PII detection (deterministic + LLM)
           if (fullContent) {
-            const piiEntities = await detectPII(fullContent);
-            const markedContent = markPIIInText(fullContent, piiEntities);
+            const allPII = await detectAllPII(fullContent);
+            const markedContent = markPIIInText(fullContent, allPII);
 
             const piiData = JSON.stringify({
               piiDetection: {
-                hasPII: piiEntities.length > 0,
+                hasPII: allPII.length > 0,
                 piiMarkers: markedContent.piiMarkers,
                 processedContent: markedContent.text,
               },
